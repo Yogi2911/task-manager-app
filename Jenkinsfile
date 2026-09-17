@@ -14,6 +14,27 @@ pipeline {
             }
         }
 
+        stage('Debug: Identity & Credential Sanity Check') {
+            steps {
+                bat 'whoami'
+                bat 'echo %USERPROFILE%'
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'dockerhub-credentials',
+                        usernameVariable: 'DOCKER_USERNAME',
+                        passwordVariable: 'DOCKER_PASSWORD'
+                    )
+                ]) {
+                    powershell '''
+                        Write-Host "Username value: $env:DOCKER_USERNAME"
+                        Write-Host "Username length: $($env:DOCKER_USERNAME.Length)"
+                        Write-Host "Password length: $($env:DOCKER_PASSWORD.Length)"
+                        Write-Host "Password starts with dckr_pat_: $($env:DOCKER_PASSWORD.StartsWith('dckr_pat_'))"
+                    '''
+                }
+            }
+        }
+
         stage('Build Docker Image') {
             steps {
                 bat 'docker build -t %DOCKER_IMAGE%:%BUILD_NUMBER% .'
