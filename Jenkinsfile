@@ -20,7 +20,7 @@ pipeline {
             }
         }
 
-        stage('Push Image to Docker Hub') {
+        stage('Test Docker Hub Credential') {
             steps {
                 withCredentials([
                     usernamePassword(
@@ -30,86 +30,45 @@ pipeline {
                     )
                 ]) {
                     bat '''
+                        echo ========================================
+                        echo Docker Hub Credential Test
+                        echo ========================================
+
+                        echo Docker Username: %DOCKER_USERNAME%
+
+                        powershell -NoProfile -Command "Write-Host ('Password length received by Jenkins: ' + $env:DOCKER_PASSWORD.Length)"
+
+                        echo.
+                        echo Testing Docker Hub login...
+                        echo.
+
                         echo %DOCKER_PASSWORD% | docker login -u %DOCKER_USERNAME% --password-stdin
 
                         if %ERRORLEVEL% NEQ 0 (
+                            echo.
                             echo Docker Hub login failed
                             exit /b 1
                         )
 
-                        docker push %DOCKER_IMAGE%:%BUILD_NUMBER%
-
-                        if %ERRORLEVEL% NEQ 0 (
-                            echo Docker image push failed
-                            exit /b 1
-                        )
-
-                        docker tag %DOCKER_IMAGE%:%BUILD_NUMBER% %DOCKER_IMAGE%:latest
-
-                        docker push %DOCKER_IMAGE%:latest
-
-                        if %ERRORLEVEL% NEQ 0 (
-                            echo Latest image push failed
-                            exit /b 1
-                        )
+                        echo.
+                        echo ========================================
+                        echo Docker Hub login succeeded!
+                        echo ========================================
 
                         docker logout
                     '''
                 }
             }
         }
-
-        stage('Deploy to Development') {
-            steps {
-                bat '''
-                    docker stop %CONTAINER_NAME% 2>NUL
-                    docker rm %CONTAINER_NAME% 2>NUL
-
-                    docker pull %DOCKER_IMAGE%:%BUILD_NUMBER%
-
-                    if %ERRORLEVEL% NEQ 0 (
-                        echo Docker image pull failed
-                        exit /b 1
-                    )
-
-                    docker run -d ^
-                        --name %CONTAINER_NAME% ^
-                        -p 4000:4000 ^
-                        %DOCKER_IMAGE%:%BUILD_NUMBER%
-
-                    if %ERRORLEVEL% NEQ 0 (
-                        echo Docker container failed to start
-                        exit /b 1
-                    )
-                '''
-            }
-        }
-
-        stage('Deployment Verification') {
-            steps {
-                bat '''
-                    powershell -Command "Start-Sleep -Seconds 10"
-
-                    curl -f http://localhost:4000/api/health
-
-                    if %ERRORLEVEL% NEQ 0 (
-                        echo Health check failed
-                        exit /b 1
-                    )
-
-                    echo Health check successful
-                '''
-            }
-        }
     }
 
     post {
         success {
-            echo 'Task Manager Docker CI/CD completed successfully!'
+            echo 'Docker Hub credential test completed successfully!'
         }
 
         failure {
-            echo 'Task Manager Docker CI/CD failed.'
+            echo 'Docker Hub credential test failed.'
         }
     }
 }
