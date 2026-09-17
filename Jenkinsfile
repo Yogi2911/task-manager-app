@@ -1,6 +1,4 @@
-
 pipeline {
-
     agent any
 
     environment {
@@ -18,36 +16,35 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                bat """
-                    docker build -t %DOCKER_IMAGE%:%BUILD_NUMBER% .
-                """
+                bat 'docker build -t %DOCKER_IMAGE%:%BUILD_NUMBER% .'
             }
         }
 
         stage('Push Image to Docker Hub') {
             steps {
-                script {
-
-                    docker.withRegistry(
-                        'https://index.docker.io/v1/',
-                        'dockerhub-credentials'
-                    ) {
-
-                        def image = docker.image(
-                            "${DOCKER_IMAGE}:${BUILD_NUMBER}"
-                        )
-
-                        image.push()
-                    }
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'dockerhub-credentials',
+                        usernameVariable: 'DOCKER_USERNAME',
+                        passwordVariable: 'DOCKER_PASSWORD'
+                    )
+                ]) {
+                    bat '''
+                        echo %DOCKER_PASSWORD% | docker login -u %DOCKER_USERNAME% --password-stdin
+                        docker push %DOCKER_IMAGE%:%BUILD_NUMBER%
+                        docker tag %DOCKER_IMAGE%:%BUILD_NUMBER% %DOCKER_IMAGE%:latest
+                        docker push %DOCKER_IMAGE%:latest
+                        docker logout
+                    '''
                 }
             }
         }
 
         stage('Deploy to Development') {
             steps {
-                bat """
-                    docker stop %CONTAINER_NAME% 2>NUL || exit 0
-                    docker rm %CONTAINER_NAME% 2>NUL || exit 0
+                bat '''
+                    docker stop %CONTAINER_NAME% 2>NUL || exit /B 0
+                    docker rm %CONTAINER_NAME% 2>NUL || exit /B 0
 
                     docker pull %DOCKER_IMAGE%:%BUILD_NUMBER%
 
@@ -55,28 +52,23 @@ pipeline {
                         --name %CONTAINER_NAME% ^
                         -p 4000:4000 ^
                         %DOCKER_IMAGE%:%BUILD_NUMBER%
-                """
+                '''
             }
         }
 
         stage('Deployment Verification') {
             steps {
-                powershell '''
-                    $url = "http://localhost:4000/api/health"
+                bat '''
+                    timeout /t 10 /nobreak
 
-                    Write-Host "Checking deployment: $url"
+                    curl -f http://localhost:4000/api/health
 
-                    $response = Invoke-WebRequest `
-                        -Uri $url `
-                        -UseBasicParsing `
-                        -TimeoutSec 30
+                    if %ERRORLEVEL% NEQ 0 (
+                        echo Health check failed
+                        exit /b 1
+                    )
 
-                    if ($response.StatusCode -ne 200) {
-                        throw "Deployment verification failed"
-                    }
-
-                    Write-Host "Deployment verification successful"
-                    Write-Host $response.Content
+                    echo Health check successful
                 '''
             }
         }
@@ -84,12 +76,11 @@ pipeline {
 
     post {
         success {
-            echo "Task Manager Docker CI/CD completed successfully."
+            echo 'Task Manager Docker CI/CD completed successfully!'
         }
 
         failure {
-            echo "Task Manager Docker CI/CD failed."
+            echo 'Task Manager Docker CI/CD failed.'
         }
     }
 }
-
