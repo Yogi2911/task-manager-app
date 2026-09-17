@@ -1,74 +1,38 @@
-pipeline {
-    agent any
+stage('Test Docker Hub Credential') {
+    steps {
+        withCredentials([
+            usernamePassword(
+                credentialsId: 'dockerhub-credentials',
+                usernameVariable: 'DOCKER_USERNAME',
+                passwordVariable: 'DOCKER_PASSWORD'
+            )
+        ]) {
+            bat '''
+                echo ========================================
+                echo Jenkins Docker Hub Credential Test
+                echo ========================================
 
-    environment {
-        DOCKER_IMAGE = "iamyoga/task-manager"
-        CONTAINER_NAME = "task-manager-dev"
-    }
+                echo Username received: %DOCKER_USERNAME%
 
-    stages {
+                powershell -NoProfile -Command ^
+                "$p=$env:DOCKER_PASSWORD; Write-Host ('Password length: ' + $p.Length); Write-Host ('Password starts with dckr_pat_: ' + $p.StartsWith('dckr_pat_'))"
 
-        stage('Checkout') {
-            steps {
-                checkout scm
-            }
-        }
+                echo.
+                echo Testing Docker Hub login...
+                echo.
 
-        stage('Build Docker Image') {
-            steps {
-                bat 'docker build -t %DOCKER_IMAGE%:%BUILD_NUMBER% .'
-            }
-        }
+                powershell -NoProfile -Command ^
+                "$env:DOCKER_PASSWORD | docker login -u $env:DOCKER_USERNAME --password-stdin"
 
-        stage('Test Docker Hub Credential') {
-            steps {
-                withCredentials([
-                    usernamePassword(
-                        credentialsId: 'dockerhub-credentials',
-                        usernameVariable: 'DOCKER_USERNAME',
-                        passwordVariable: 'DOCKER_PASSWORD'
-                    )
-                ]) {
-                    bat '''
-                        echo ========================================
-                        echo Docker Hub Credential Test
-                        echo ========================================
+                if %ERRORLEVEL% NEQ 0 (
+                    echo Docker Hub login FAILED
+                    exit /b 1
+                )
 
-                        echo Docker Username: %DOCKER_USERNAME%
+                echo Docker Hub login SUCCEEDED!
 
-                        powershell -NoProfile -Command "Write-Host ('Password length received by Jenkins: ' + $env:DOCKER_PASSWORD.Length)"
-
-                        echo.
-                        echo Testing Docker Hub login...
-                        echo.
-
-                        echo %DOCKER_PASSWORD% | docker login -u %DOCKER_USERNAME% --password-stdin
-
-                        if %ERRORLEVEL% NEQ 0 (
-                            echo.
-                            echo Docker Hub login failed
-                            exit /b 1
-                        )
-
-                        echo.
-                        echo ========================================
-                        echo Docker Hub login succeeded!
-                        echo ========================================
-
-                        docker logout
-                    '''
-                }
-            }
-        }
-    }
-
-    post {
-        success {
-            echo 'Docker Hub credential test completed successfully!'
-        }
-
-        failure {
-            echo 'Docker Hub credential test failed.'
+                docker logout
+            '''
         }
     }
 }
