@@ -29,31 +29,16 @@ pipeline {
                         passwordVariable: 'DOCKER_PASSWORD'
                     )
                 ]) {
-                    powershell '''
-                        Write-Host "========================================"
-                        Write-Host "Docker Hub Credential Test"
-                        Write-Host "========================================"
+                    bat '''
+                        echo Username: %DOCKER_USERNAME%
+                        echo %DOCKER_PASSWORD% | docker login -u %DOCKER_USERNAME% --password-stdin
 
-                        Write-Host "Username received: $env:DOCKER_USERNAME"
-                        Write-Host "Password length: $($env:DOCKER_PASSWORD.Length)"
-                        Write-Host "Token prefix valid: $($env:DOCKER_PASSWORD.StartsWith("dckr_pat_"))"
+                        if %ERRORLEVEL% NEQ 0 (
+                            echo Docker Hub login FAILED
+                            exit /b 1
+                        )
 
-                        Write-Host ""
-                        Write-Host "Testing Docker Hub login..."
-
-                        $env:DOCKER_PASSWORD | docker login `
-                            --username $env:DOCKER_USERNAME `
-                            --password-stdin
-
-                        if ($LASTEXITCODE -ne 0) {
-                            Write-Host "Docker Hub login FAILED"
-                            exit 1
-                        }
-
-                        Write-Host ""
-                        Write-Host "Docker Hub login SUCCEEDED!"
-
-                        docker logout
+                        echo Docker Hub login SUCCESSFUL
                     '''
                 }
             }
@@ -68,39 +53,26 @@ pipeline {
                         passwordVariable: 'DOCKER_PASSWORD'
                     )
                 ]) {
-                    powershell '''
-                        Write-Host "Pushing version $env:BUILD_NUMBER..."
+                    bat '''
+                        echo Pushing image: %DOCKER_IMAGE%:%BUILD_NUMBER%
 
-                        $env:DOCKER_PASSWORD | docker login `
-                            --username $env:DOCKER_USERNAME `
-                            --password-stdin
+                        docker push %DOCKER_IMAGE%:%BUILD_NUMBER%
 
-                        if ($LASTEXITCODE -ne 0) {
-                            Write-Host "Docker Hub login failed"
-                            exit 1
-                        }
+                        if %ERRORLEVEL% NEQ 0 (
+                            echo Docker image push failed
+                            exit /b 1
+                        )
 
-                        docker push "$env:DOCKER_IMAGE`:$env:BUILD_NUMBER"
+                        docker tag %DOCKER_IMAGE%:%BUILD_NUMBER% %DOCKER_IMAGE%:latest
 
-                        if ($LASTEXITCODE -ne 0) {
-                            Write-Host "Docker image push failed"
-                            exit 1
-                        }
+                        docker push %DOCKER_IMAGE%:latest
 
-                        docker tag `
-                            "$env:DOCKER_IMAGE`:$env:BUILD_NUMBER" `
-                            "$env:DOCKER_IMAGE`:latest"
+                        if %ERRORLEVEL% NEQ 0 (
+                            echo Latest image push failed
+                            exit /b 1
+                        )
 
-                        docker push "$env:DOCKER_IMAGE`:latest"
-
-                        if ($LASTEXITCODE -ne 0) {
-                            Write-Host "Latest image push failed"
-                            exit 1
-                        }
-
-                        docker logout
-
-                        Write-Host "Docker images pushed successfully!"
+                        echo Docker images pushed successfully!
                     '''
                 }
             }
