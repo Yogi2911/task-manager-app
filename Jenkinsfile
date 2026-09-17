@@ -51,7 +51,7 @@ pipeline {
                         if %ERRORLEVEL% NEQ 0 (
                             echo Latest image push failed
                             exit /b 1
-                        }
+                        )
 
                         docker logout
                     '''
