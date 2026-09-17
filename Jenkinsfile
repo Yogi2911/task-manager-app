@@ -31,9 +31,28 @@ pipeline {
                 ]) {
                     bat '''
                         echo %DOCKER_PASSWORD% | docker login -u %DOCKER_USERNAME% --password-stdin
+
+                        if %ERRORLEVEL% NEQ 0 (
+                            echo Docker Hub login failed
+                            exit /b 1
+                        )
+
                         docker push %DOCKER_IMAGE%:%BUILD_NUMBER%
+
+                        if %ERRORLEVEL% NEQ 0 (
+                            echo Docker image push failed
+                            exit /b 1
+                        )
+
                         docker tag %DOCKER_IMAGE%:%BUILD_NUMBER% %DOCKER_IMAGE%:latest
+
                         docker push %DOCKER_IMAGE%:latest
+
+                        if %ERRORLEVEL% NEQ 0 (
+                            echo Latest image push failed
+                            exit /b 1
+                        }
+
                         docker logout
                     '''
                 }
@@ -43,15 +62,25 @@ pipeline {
         stage('Deploy to Development') {
             steps {
                 bat '''
-                    docker stop %CONTAINER_NAME% 2>NUL || exit /B 0
-                    docker rm %CONTAINER_NAME% 2>NUL || exit /B 0
+                    docker stop %CONTAINER_NAME% 2>NUL
+                    docker rm %CONTAINER_NAME% 2>NUL
 
                     docker pull %DOCKER_IMAGE%:%BUILD_NUMBER%
+
+                    if %ERRORLEVEL% NEQ 0 (
+                        echo Docker image pull failed
+                        exit /b 1
+                    )
 
                     docker run -d ^
                         --name %CONTAINER_NAME% ^
                         -p 4000:4000 ^
                         %DOCKER_IMAGE%:%BUILD_NUMBER%
+
+                    if %ERRORLEVEL% NEQ 0 (
+                        echo Docker container failed to start
+                        exit /b 1
+                    )
                 '''
             }
         }
@@ -59,7 +88,7 @@ pipeline {
         stage('Deployment Verification') {
             steps {
                 bat '''
-                    timeout /t 10 /nobreak
+                    powershell -Command "Start-Sleep -Seconds 10"
 
                     curl -f http://localhost:4000/api/health
 
