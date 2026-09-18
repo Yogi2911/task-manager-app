@@ -3,83 +3,48 @@ pipeline {
 
     environment {
         DOCKER_IMAGE = "iamyoga/task-manager"
-        IMAGE_TAG = "${BUILD_NUMBER}"
-
-        DEV_CONTAINER = "task-manager-dev"
-        STAGING_CONTAINER = "task-manager-staging"
-        PROD_CONTAINER = "task-manager-prod"
-
-        DEV_PORT = "4000"
-        STAGING_PORT = "4001"
-        PROD_PORT = "4002"
-
         APP_PORT = "4000"
-
-        PREVIOUS_PROD_IMAGE_FILE = "previous-prod-image.txt"
+        CONTAINER_NAME = "task-manager-dev"
     }
 
     options {
         timestamps()
         disableConcurrentBuilds()
 
-        // Maximum time allowed for the complete pipeline
-        timeout(time: 30, unit: 'MINUTES')
+        // Maximum pipeline execution time
+        timeout(time: 20, unit: 'MINUTES')
     }
 
     stages {
 
-        // ============================================================
-        // 1. CHECKOUT
-        // ============================================================
-
         stage('Checkout') {
             steps {
-                echo '========================================'
-                echo 'CHECKING OUT SOURCE CODE'
-                echo '========================================'
-
                 git branch: 'main',
                     url: 'https://github.com/Yogi2911/task-manager-app.git'
-
-                echo 'Checkout completed successfully.'
             }
         }
-
-
-        // ============================================================
-        // 2. BUILD DOCKER IMAGE
-        // ============================================================
 
         stage('Build Docker Image') {
             steps {
-                bat '''
+                bat """
                     echo ========================================
-                    echo BUILDING DOCKER IMAGE
+                    echo Building Docker Image
                     echo ========================================
 
-                    docker build ^
-                        -t %DOCKER_IMAGE%:%IMAGE_TAG% ^
-                        -t %DOCKER_IMAGE%:latest .
+                    docker build -t %DOCKER_IMAGE%:%BUILD_NUMBER% .
 
                     if %ERRORLEVEL% NEQ 0 (
-                        echo Docker image build FAILED
+                        echo Docker image build failed
                         exit /b 1
                     )
 
-                    echo.
-                    echo Docker image built successfully.
-                    echo Version: %DOCKER_IMAGE%:%IMAGE_TAG%
-                    echo Latest : %DOCKER_IMAGE%:latest
-                '''
+                    echo Docker image built successfully
+                    echo Image: %DOCKER_IMAGE%:%BUILD_NUMBER%
+                """
             }
         }
 
-
-        // ============================================================
-        // 3. DOCKER HUB LOGIN
-        // ============================================================
-
-        stage('Docker Hub Login') {
+        stage('Docker Login') {
             steps {
                 withCredentials([
                     usernamePassword(
@@ -88,591 +53,198 @@ pipeline {
                         passwordVariable: 'DOCKER_PASSWORD'
                     )
                 ]) {
+                    bat """
+                        echo Logging into Docker Hub
 
-                    bat '''
-                        echo ========================================
-                        echo DOCKER HUB LOGIN
-                        echo ========================================
-
-                        powershell -NoProfile -Command "$env:DOCKER_PASSWORD | docker login --username $env:DOCKER_USER --password-stdin"
+                        powershell -NoProfile -Command ^
+                        "\$env:DOCKER_PASSWORD | docker login --username \$env:DOCKER_USER --password-stdin"
 
                         if %ERRORLEVEL% NEQ 0 (
-                            echo Docker Hub login FAILED
+                            echo Docker Hub login failed
                             exit /b 1
                         )
 
-                        echo Docker Hub login SUCCESSFUL
-                    '''
+                        echo Docker Hub login successful
+                    """
                 }
             }
         }
-
-
-        // ============================================================
-        // 4. PUSH IMAGE
-        // ============================================================
 
         stage('Push Image to Docker Hub') {
             steps {
-                bat '''
+                bat """
                     echo ========================================
-                    echo PUSHING DOCKER IMAGE
+                    echo Pushing Docker Image
                     echo ========================================
 
-                    echo.
-                    echo Pushing build image:
-                    echo %DOCKER_IMAGE%:%IMAGE_TAG%
-
-                    docker push %DOCKER_IMAGE%:%IMAGE_TAG%
+                    docker push %DOCKER_IMAGE%:%BUILD_NUMBER%
 
                     if %ERRORLEVEL% NEQ 0 (
-                        echo Version image push FAILED
+                        echo Docker image push failed
                         exit /b 1
                     )
 
-                    echo Version image pushed successfully.
-
-                    echo.
-                    echo Pushing latest image:
-                    echo %DOCKER_IMAGE%:latest
-
-                    docker push %DOCKER_IMAGE%:latest
-
-                    if %ERRORLEVEL% NEQ 0 (
-                        echo Latest image push FAILED
-                        exit /b 1
-                    }
-
-                    echo Latest image pushed successfully.
-                '''
+                    echo Docker image pushed successfully
+                """
             }
         }
 
+        stage('Get Previous Version') {
+            steps {
+                script {
 
-        // ============================================================
-        // 5. DEPLOY TO DEVELOPMENT
-        // ============================================================
+                    def previousBuild = currentBuild.previousSuccessfulBuild
+
+                    if (previousBuild != null) {
+                        env.PREVIOUS_VERSION = previousBuild.number.toString()
+                    } else {
+                        env.PREVIOUS_VERSION = ""
+                    }
+
+                    echo "Current version  : ${env.BUILD_NUMBER}"
+                    echo "Previous version : ${env.PREVIOUS_VERSION}"
+                }
+            }
+        }
 
         stage('Deploy to Development') {
-
-            options {
-                timeout(time: 5, unit: 'MINUTES')
-            }
-
             steps {
-
-                bat '''
+                bat """
                     echo ========================================
-                    echo DEPLOYING TO DEVELOPMENT
+                    echo Deploying to Development
                     echo ========================================
 
-                    echo.
-                    echo Removing old DEV container if present...
+                    echo Stopping existing container...
 
-                    docker rm -f %DEV_CONTAINER% 2>NUL
+                    docker rm -f %CONTAINER_NAME% 2>NUL
 
-                    echo.
-                    echo Starting new DEV container...
+                    echo Starting new container...
 
                     docker run -d ^
-                        --name %DEV_CONTAINER% ^
-                        -p %DEV_PORT%:%APP_PORT% ^
-                        %DOCKER_IMAGE%:%IMAGE_TAG%
+                        --name %CONTAINER_NAME% ^
+                        -p %APP_PORT%:%APP_PORT% ^
+                        %DOCKER_IMAGE%:%BUILD_NUMBER%
 
                     if %ERRORLEVEL% NEQ 0 (
-                        echo DEV deployment FAILED
+                        echo Deployment failed
                         exit /b 1
                     )
 
-                    echo.
-                    echo DEV deployment SUCCESSFUL.
-                    echo Container: %DEV_CONTAINER%
-                    echo URL: http://localhost:%DEV_PORT%
+                    echo Container started successfully
 
-                    echo.
-                    echo DEV container status:
-
-                    docker ps --filter "name=%DEV_CONTAINER%"
-                '''
+                    docker ps --filter "name=%CONTAINER_NAME%"
+                """
             }
         }
 
-
-        // ============================================================
-        // 6. VERIFY DEVELOPMENT
-        // ============================================================
-
-        stage('Verify Development') {
-
-            options {
-                timeout(time: 3, unit: 'MINUTES')
-            }
-
+        stage('Deployment Verification') {
             steps {
-
-                bat '''
+                bat """
                     echo ========================================
-                    echo VERIFYING DEVELOPMENT
+                    echo Deployment Verification
                     echo ========================================
 
-                    echo.
-                    echo Waiting for application startup...
+                    echo Waiting for application to start...
 
-                    ping -n 8 127.0.0.1 > nul
+                    ping -n 6 127.0.0.1 >nul
 
-                    echo.
-                    echo Checking DEV health endpoint...
+                    echo Checking health endpoint...
 
-                    curl -f http://localhost:%DEV_PORT%/api/health
+                    curl -f http://localhost:%APP_PORT%/api/health
 
                     if %ERRORLEVEL% NEQ 0 (
-                        echo DEV health check FAILED
+                        echo ========================================
+                        echo HEALTH CHECK FAILED
+                        echo ========================================
                         exit /b 1
                     )
 
-                    echo.
-                    echo DEV health check SUCCESSFUL.
-
-                    echo DEV URL:
-                    echo http://localhost:%DEV_PORT%/api/health
-                '''
-            }
-        }
-
-
-        // ============================================================
-        // 7. DEPLOY TO STAGING
-        // ============================================================
-
-        stage('Deploy to Staging') {
-
-            options {
-                timeout(time: 5, unit: 'MINUTES')
-            }
-
-            steps {
-
-                bat '''
                     echo ========================================
-                    echo DEPLOYING TO STAGING
+                    echo HEALTH CHECK SUCCESSFUL
                     echo ========================================
 
-                    echo.
-                    echo Removing old STAGING container if present...
-
-                    docker rm -f %STAGING_CONTAINER% 2>NUL
-
-                    echo.
-                    echo Starting new STAGING container...
-
-                    docker run -d ^
-                        --name %STAGING_CONTAINER% ^
-                        -p %STAGING_PORT%:%APP_PORT% ^
-                        %DOCKER_IMAGE%:%IMAGE_TAG%
-
-                    if %ERRORLEVEL% NEQ 0 (
-                        echo STAGING deployment FAILED
-                        exit /b 1
-                    )
-
-                    echo.
-                    echo STAGING deployment SUCCESSFUL.
-                    echo Container: %STAGING_CONTAINER%
-                    echo URL: http://localhost:%STAGING_PORT%
-
-                    echo.
-                    echo STAGING container status:
-
-                    docker ps --filter "name=%STAGING_CONTAINER%"
-                '''
-            }
-        }
-
-
-        // ============================================================
-        // 8. VERIFY STAGING
-        // ============================================================
-
-        stage('Verify Staging') {
-
-            options {
-                timeout(time: 3, unit: 'MINUTES')
-            }
-
-            steps {
-
-                bat '''
-                    echo ========================================
-                    echo VERIFYING STAGING
-                    echo ========================================
-
-                    echo.
-                    echo Waiting for application startup...
-
-                    ping -n 8 127.0.0.1 > nul
-
-                    echo.
-                    echo Checking STAGING health endpoint...
-
-                    curl -f http://localhost:%STAGING_PORT%/api/health
-
-                    if %ERRORLEVEL% NEQ 0 (
-                        echo STAGING health check FAILED
-                        exit /b 1
-                    )
-
-                    echo.
-                    echo STAGING health check SUCCESSFUL.
-
-                    echo STAGING URL:
-                    echo http://localhost:%STAGING_PORT%/api/health
-                '''
-            }
-        }
-
-
-        // ============================================================
-        // 9. SAVE PREVIOUS PRODUCTION IMAGE
-        // ============================================================
-
-        stage('Save Previous Production Image') {
-
-            options {
-                timeout(time: 2, unit: 'MINUTES')
-            }
-
-            steps {
-
-                bat '''
-                    echo ========================================
-                    echo SAVING PREVIOUS PRODUCTION IMAGE
-                    echo ========================================
-
-                    if exist "%PREVIOUS_PROD_IMAGE_FILE%" (
-                        del /f /q "%PREVIOUS_PROD_IMAGE_FILE%"
-                    )
-
-                    echo.
-                    echo Checking existing production container...
-
-                    docker inspect %PROD_CONTAINER% --format="{{.Config.Image}}" > "%PREVIOUS_PROD_IMAGE_FILE%" 2>NUL
-
-                    if exist "%PREVIOUS_PROD_IMAGE_FILE%" (
-
-                        for /f "usebackq delims=" %%I in ("%PREVIOUS_PROD_IMAGE_FILE%") do (
-                            echo Previous production image: %%I
-                        )
-
-                        echo.
-                        echo Previous production image saved successfully.
-
-                    ) else (
-
-                        echo.
-                        echo No previous production container found.
-                        echo This may be the first production deployment.
-
-                    )
-                '''
-            }
-        }
-
-
-        // ============================================================
-        // 10. PRODUCTION APPROVAL
-        // ============================================================
-
-        stage('Production Approval') {
-
-            options {
-                timeout(time: 10, unit: 'MINUTES')
-            }
-
-            steps {
-
-                script {
-
-                    input(
-                        message: "DEV and STAGING verification passed. Deploy build #${BUILD_NUMBER} to PRODUCTION?",
-                        ok: "Approve Production Deployment",
-                        submitter: "admin"
-                    )
-                }
-            }
-        }
-
-
-        // ============================================================
-        // 11. PRODUCTION DEPLOYMENT + ROLLBACK
-        // ============================================================
-
-        stage('Deploy to Production') {
-
-            options {
-                timeout(time: 5, unit: 'MINUTES')
-            }
-
-            steps {
-
-                script {
-
-                    try {
-
-                        echo '========================================'
-                        echo 'DEPLOYING TO PRODUCTION'
-                        echo '========================================'
-
-                        bat '''
-                            echo.
-                            echo Current production container:
-
-                            docker ps -a --filter "name=%PROD_CONTAINER%"
-
-                            echo.
-                            echo Removing current production container...
-
-                            docker rm -f %PROD_CONTAINER% 2>NUL
-
-                            echo.
-                            echo Starting new production container...
-
-                            docker run -d ^
-                                --name %PROD_CONTAINER% ^
-                                -p %PROD_PORT%:%APP_PORT% ^
-                                %DOCKER_IMAGE%:%IMAGE_TAG%
-
-                            if %ERRORLEVEL% NEQ 0 (
-                                echo PRODUCTION deployment FAILED
-                                exit /b 1
-                            )
-
-                            echo.
-                            echo PRODUCTION deployment SUCCESSFUL.
-
-                            echo Container:
-                            echo %PROD_CONTAINER%
-
-                            echo URL:
-                            echo http://localhost:%PROD_PORT%
-
-                            echo.
-                            echo Production container status:
-
-                            docker ps --filter "name=%PROD_CONTAINER%"
-                        '''
-
-
-                        // ====================================================
-                        // PRODUCTION HEALTH CHECK
-                        // ====================================================
-
-                        echo '========================================'
-                        echo 'VERIFYING PRODUCTION'
-                        echo '========================================'
-
-                        bat '''
-                            echo.
-                            echo Waiting for production application startup...
-
-                            ping -n 8 127.0.0.1 > nul
-
-                            echo.
-                            echo Checking PRODUCTION health endpoint...
-
-                            curl -f http://localhost:%PROD_PORT%/api/health
-
-                            if %ERRORLEVEL% NEQ 0 (
-                                echo PRODUCTION health check FAILED
-                                exit /b 1
-                            )
-
-                            echo.
-                            echo PRODUCTION health check SUCCESSFUL.
-
-                            echo PRODUCTION URL:
-                            echo http://localhost:%PROD_PORT%/api/health
-                        '''
-
-                        echo '========================================'
-                        echo 'PRODUCTION DEPLOYMENT SUCCESSFUL'
-                        echo '========================================'
-
-                    }
-
-                    catch (Exception e) {
-
-                        echo '========================================'
-                        echo 'PRODUCTION DEPLOYMENT FAILED'
-                        echo 'STARTING ROLLBACK'
-                        echo '========================================'
-
-
-                        // ====================================================
-                        // REMOVE FAILED PRODUCTION CONTAINER
-                        // ====================================================
-
-                        bat '''
-                            echo.
-                            echo Removing failed production container...
-
-                            docker rm -f %PROD_CONTAINER% 2>NUL
-
-                            echo Failed production container removed.
-                        '''
-
-
-                        // ====================================================
-                        // CHECK FOR PREVIOUS IMAGE
-                        // ====================================================
-
-                        bat '''
-                            echo.
-                            echo Checking for previous production image...
-
-                            if exist "%PREVIOUS_PROD_IMAGE_FILE%" (
-
-                                echo Previous production image found.
-
-                                for /f "usebackq delims=" %%I in ("%PREVIOUS_PROD_IMAGE_FILE%") do (
-
-                                    echo.
-                                    echo Restoring image:
-                                    echo %%I
-
-                                    echo.
-                                    echo Starting rollback container...
-
-                                    docker run -d ^
-                                        --name %PROD_CONTAINER% ^
-                                        -p %PROD_PORT%:%APP_PORT% ^
-                                        %%I
-
-                                    if %ERRORLEVEL% NEQ 0 (
-                                        echo ROLLBACK FAILED
-                                        exit /b 1
-                                    )
-
-                                    echo.
-                                    echo Rollback container started successfully.
-                                )
-
-                            ) else (
-
-                                echo.
-                                echo No previous production image available.
-                                echo Rollback cannot be performed.
-                                exit /b 1
-                            )
-                        '''
-
-
-                        // ====================================================
-                        // VERIFY ROLLBACK
-                        // ====================================================
-
-                        echo '========================================'
-                        echo 'VERIFYING ROLLBACK'
-                        echo '========================================'
-
-                        bat '''
-                            echo.
-                            echo Waiting for rollback application startup...
-
-                            ping -n 8 127.0.0.1 > nul
-
-                            echo.
-                            echo Checking rolled-back production health...
-
-                            curl -f http://localhost:%PROD_PORT%/api/health
-
-                            if %ERRORLEVEL% NEQ 0 (
-                                echo ROLLBACK HEALTH CHECK FAILED
-                                exit /b 1
-                            )
-
-                            echo.
-                            echo ROLLBACK HEALTH CHECK SUCCESSFUL.
-                            echo Previous production version restored.
-                        '''
-
-
-                        echo '========================================'
-                        echo 'ROLLBACK COMPLETED'
-                        echo '========================================'
-
-                        // Make the Jenkins build fail after rollback.
-                        throw e
-                    }
-                }
+                    echo Application is running:
+                    echo http://localhost:%APP_PORT%/api/health
+                """
             }
         }
     }
 
-
-    // ================================================================
-    // POST ACTIONS
-    // ================================================================
-
     post {
 
-        success {
-
-            echo '========================================'
-            echo 'TASK MANAGER CI/CD SUCCESSFUL'
-            echo '========================================'
-
-            echo 'DEV      : http://localhost:4000'
-            echo 'STAGING  : http://localhost:4001'
-            echo 'PROD     : http://localhost:4002'
-
-            echo 'IMAGE    : iamyoga/task-manager:%IMAGE_TAG%'
-
-            echo '========================================'
-        }
-
-
         failure {
+            script {
 
-            echo '========================================'
-            echo 'PIPELINE FAILED'
-            echo '========================================'
+                echo "========================================"
+                echo "DEPLOYMENT FAILED"
+                echo "Starting automatic rollback"
+                echo "========================================"
 
-            echo 'Checking running containers...'
+                if (env.PREVIOUS_VERSION?.trim()) {
 
-            bat '''
-                echo.
-                echo DEV:
+                    echo "Rolling back to version: ${env.PREVIOUS_VERSION}"
 
-                docker ps -a --filter "name=task-manager-dev"
+                    bat """
+                        echo Stopping failed container...
 
-                echo.
-                echo STAGING:
+                        docker rm -f %CONTAINER_NAME% 2>NUL
 
-                docker ps -a --filter "name=task-manager-staging"
+                        echo Starting previous version...
 
-                echo.
-                echo PRODUCTION:
+                        docker run -d ^
+                            --name %CONTAINER_NAME% ^
+                            -p %APP_PORT%:%APP_PORT% ^
+                            %DOCKER_IMAGE%:%PREVIOUS_VERSION%
 
-                docker ps -a --filter "name=task-manager-prod"
-            '''
+                        if %ERRORLEVEL% NEQ 0 (
+                            echo ROLLBACK FAILED
+                            exit /b 1
+                        )
 
-            echo '========================================'
+                        echo Previous version started successfully
+
+                        docker ps --filter "name=%CONTAINER_NAME%"
+                    """
+
+                    bat """
+                        echo ========================================
+                        echo Verifying rollback
+                        echo ========================================
+
+                        ping -n 6 127.0.0.1 >nul
+
+                        curl -f http://localhost:%APP_PORT%/api/health
+
+                        if %ERRORLEVEL% NEQ 0 (
+                            echo ROLLBACK VERIFICATION FAILED
+                            exit /b 1
+                        )
+
+                        echo ========================================
+                        echo ROLLBACK SUCCESSFUL
+                        echo ========================================
+                        echo Restored version: %PREVIOUS_VERSION%
+                    """
+
+                } else {
+
+                    echo "No previous successful build available."
+                    echo "Rollback cannot be performed."
+                }
+            }
         }
-
-
-        aborted {
-
-            echo '========================================'
-            echo 'PIPELINE ABORTED'
-            echo '========================================'
-        }
-
 
         always {
-
-            bat '''
+            bat """
                 docker logout || exit 0
-            '''
+            """
+        }
+
+        success {
+            echo "========================================"
+            echo "Task Manager Docker CI/CD succeeded."
+            echo "Deployed version: ${env.BUILD_NUMBER}"
+            echo "========================================"
         }
     }
 }
