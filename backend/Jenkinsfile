@@ -213,7 +213,8 @@ pipeline {
 
                         ping -n 6 127.0.0.1 >nul
 
-                        curl -f http://localhost:%APP_PORT%/api/health
+                       
+                        curl -f http://localhost:%APP_PORT%/api/health-invalid
 
                         if %ERRORLEVEL% NEQ 0 (
                             echo ROLLBACK VERIFICATION FAILED
